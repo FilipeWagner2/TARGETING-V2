@@ -3,3 +3,6 @@ venv/
 .env
 __pycache__/
 *.pyc
+rag_data/repos/*
+!rag_data/repos/.gitkeep
+rag_data/indexes/*.json

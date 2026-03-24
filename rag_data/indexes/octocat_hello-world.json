@@ -1,1 +1,0 @@
-{"repo_id": "octocat_hello-world", "repo_url": "https://github.com/octocat/Hello-World.git", "created_at": "2026-03-23T15:05:09.195124+00:00", "files_processed": 1, "chunks": [{"path": "README", "start_line": 1, "end_line": 1, "content": "Hello World!", "tf": {"hello": 1, "world": 1}, "length": 2}], "df": {"hello": 1, "world": 1}, "avg_doc_len": 2.0}

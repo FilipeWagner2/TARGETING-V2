@@ -73,8 +73,10 @@ Assim, o agente deixa de responder de forma generica e passa a responder com fun
 
 ## Novidades da V2
 - Cobertura de ingestao ampliada: mais tipos de arquivos de codigo e configuracao entram como candidatos.
+- Cobertura de ingestao ampliada para arquivos sem extensao comum (ex.: Jenkinsfile, Procfile e nomes customizados curtos).
 - Relatorio de cobertura: o indice salva estatisticas de arquivos vistos, candidatos, indexados e ignorados por motivo.
 - Entendimento estrutural explicito: o pipeline salva resumo estrutural com diretorios, linguagens, sinais de framework e entrypoints.
+- Entendimento estrutural com camadas: o pipeline infere pistas de API, dominio, dados, testes e infraestrutura.
 - Resposta padronizada: a saida final segue secoes fixas e consistentes.
 - Adaptacao por intencao: classificacao simples de intencao ajusta profundidade de recuperacao e orientacao da resposta.
 

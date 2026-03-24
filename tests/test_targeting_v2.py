@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 import teste
 
@@ -61,6 +62,24 @@ class TargetingV2Tests(unittest.TestCase):
             "https://github.com/octocat/Hello-World",
         )
         self.assertTrue("arquitetura" in question.lower())
+
+    def test_supports_extensionless_file_for_better_coverage(self) -> None:
+        self.assertTrue(teste.is_supported_file(Path("Jenkinsfile")))
+        self.assertTrue(teste.is_supported_file(Path("Procfile")))
+        self.assertTrue(teste.is_supported_file(Path("SCRIPT_SEM_EXTENSAO")))
+
+    def test_structure_summary_has_layers_and_key_files(self) -> None:
+        indexed_paths = {
+            "Controllers/PacientesController.cs",
+            "Models/Paciente.cs",
+            "Data/AppDbContext.cs",
+            "Program.cs",
+            "README.md",
+        }
+        structure = teste.build_structure_summary("repo_demo", indexed_paths)
+        self.assertIn("layers", structure)
+        self.assertIn("key_files", structure)
+        self.assertTrue(any(name.endswith("Program.cs") for name in structure["key_files"]))
 
 
 if __name__ == "__main__":

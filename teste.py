@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import textwrap
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,13 @@ INTENT_PROFILES = {
             "Detalhar a primeira entrega executavel.",
         ],
     },
+}
+
+INTENT_KEYWORDS = {
+    "debugging": ["erro", "bug", "falha", "quebra", "stack trace", "exception", "corrigir", "fix"],
+    "arquitetura": ["arquitetura", "estrutura", "componentes", "modulos", "design", "organiza"],
+    "implementacao": ["implementar", "implemente", "criar", "adicionar", "desenvolver", "codificar", "fazer"],
+    "planejamento": ["plano", "roadmap", "fases", "prioridade", "estimativa", "cronograma"],
 }
 
 IGNORED_DIRS = {
@@ -144,6 +152,16 @@ SUPPORTED_EXTENSIONS = {
     ".tf",
     ".hcl",
     ".proto",
+    ".properties",
+    ".graphql",
+    ".gql",
+    ".prisma",
+    ".vue",
+    ".svelte",
+    ".astro",
+    ".cshtml",
+    ".fs",
+    ".fsproj",
 }
 
 SUPPORTED_FILENAMES = {
@@ -164,6 +182,20 @@ SUPPORTED_FILENAMES = {
     "go.sum",
     "cargo.toml",
     "cargo.lock",
+    "jenkinsfile",
+    "procfile",
+    "gemfile",
+    "rakefile",
+    "gradlew",
+    "gradlew.bat",
+    "cmakelists.txt",
+}
+
+COMMON_EXTENSIONLESS_PREFIXES = {
+    "readme",
+    "license",
+    "changelog",
+    "dockerfile",
 }
 
 LANGUAGE_BY_EXTENSION = {
@@ -413,9 +445,21 @@ def file_type_label(file_path: Path) -> str:
 def is_supported_file(file_path: Path) -> bool:
     name_lower = file_path.name.lower()
     suffix = file_path.suffix.lower()
+
+    if name_lower in SUPPORTED_FILENAMES:
+        return True
+    if any(name_lower.startswith(prefix) for prefix in COMMON_EXTENSIONLESS_PREFIXES):
+        return True
+    if suffix in SUPPORTED_EXTENSIONS:
+        return True
+
+    # Permite arquivos sem extensao comum para aumentar cobertura (ex.: scripts ou configs custom).
+    if not suffix and not name_lower.startswith(".") and len(name_lower) <= 48:
+        return True
+
     return (
         name_lower in SUPPORTED_FILENAMES
-        or name_lower.startswith("readme")
+        or any(name_lower.startswith(prefix) for prefix in COMMON_EXTENSIONLESS_PREFIXES)
         or suffix in SUPPORTED_EXTENSIONS
     )
 
@@ -521,6 +565,17 @@ def build_structure_summary(repo_id: str, indexed_paths: set[str]) -> dict:
     top_level_files: list[str] = []
     language_counter: Counter[str] = Counter()
     entrypoints: set[str] = set()
+    layer_counter: Counter[str] = Counter()
+    key_files: set[str] = set()
+
+    layer_keywords = {
+        "api": {"controller", "controllers", "routes", "router", "api"},
+        "service": {"service", "services", "usecase", "usecases", "application"},
+        "domain": {"domain", "model", "models", "entity", "entities"},
+        "data": {"repository", "repositories", "data", "db", "database", "migration", "migrations"},
+        "test": {"test", "tests", "spec", "__tests__"},
+        "infra": {"infra", "infrastructure", "docker", "k8s", "terraform", "deploy"},
+    }
 
     for path in sorted(indexed_paths):
         normalized = path.replace("\\", "/")
@@ -538,6 +593,24 @@ def build_structure_summary(repo_id: str, indexed_paths: set[str]) -> dict:
 
         if filename in {"main.py", "app.py", "program.cs", "index.js", "server.js", "manage.py"}:
             entrypoints.add(normalized)
+
+        if filename in {
+            "package.json",
+            "requirements.txt",
+            "pyproject.toml",
+            "dockerfile",
+            "program.cs",
+            "main.py",
+            "readme",
+            "readme.md",
+        }:
+            key_files.add(normalized)
+
+        parts_lower = [p.lower() for p in parts]
+        for layer, keywords in layer_keywords.items():
+            if any(part in keywords for part in parts_lower):
+                layer_counter[layer] += 1
+                break
 
     framework_signals: list[str] = []
     if any(path.endswith("requirements.txt") or path.endswith("pyproject.toml") for path in lower_paths):
@@ -557,6 +630,8 @@ def build_structure_summary(repo_id: str, indexed_paths: set[str]) -> dict:
         "top_level_directories": [name for name, _ in top_level_dirs.most_common(12)],
         "top_level_files": sorted(top_level_files)[:20],
         "languages": dict(language_counter.most_common()),
+        "layers": dict(layer_counter.most_common()),
+        "key_files": sorted(key_files)[:20],
         "framework_signals": framework_signals,
         "entrypoints": sorted(entrypoints),
     }
@@ -571,12 +646,16 @@ def format_structure_summary(structure: dict) -> str:
     languages = structure.get("languages", {})
     frameworks = structure.get("framework_signals", [])
     entrypoints = structure.get("entrypoints", [])
+    layers = structure.get("layers", {})
+    key_files = structure.get("key_files", [])
 
     lang_text = ", ".join(f"{name}:{count}" for name, count in list(languages.items())[:8]) or "n/a"
     dirs_text = ", ".join(dirs[:8]) or "n/a"
     files_text = ", ".join(files[:8]) or "n/a"
     frameworks_text = ", ".join(frameworks) or "n/a"
     entrypoints_text = ", ".join(entrypoints[:8]) or "n/a"
+    layers_text = ", ".join(f"{name}:{count}" for name, count in list(layers.items())[:8]) or "n/a"
+    key_files_text = ", ".join(key_files[:8]) or "n/a"
 
     return "\n".join(
         [
@@ -585,6 +664,8 @@ def format_structure_summary(structure: dict) -> str:
             f"top_dirs={dirs_text}",
             f"top_files={files_text}",
             f"linguagens={lang_text}",
+            f"camadas={layers_text}",
+            f"arquivos_chave={key_files_text}",
             f"sinais_framework={frameworks_text}",
             f"entrypoints={entrypoints_text}",
         ]
@@ -619,11 +700,14 @@ def build_evidence_lines(chunks: list[dict], max_items: int = 6) -> list[str]:
 def build_recommended_request(user_question: str, repo_id: str, structure: dict, intent: str) -> list[str]:
     top_dirs = structure.get("top_level_directories", [])
     dirs_text = ", ".join(top_dirs[:5]) or "raiz"
+    key_files = structure.get("key_files", [])
+    key_files_text = ", ".join(key_files[:5]) or "n/a"
 
     return [
         f"- Intencao identificada: {intent}",
         f"- Contexto: analisar o repositorio {repo_id} com foco no pedido: {user_question}",
         f"- Escopo sugerido: priorizar areas {dirs_text} e pontos de entrada relevantes.",
+        f"- Arquivos-chave sugeridos para validacao: {key_files_text}",
         "- Entregavel: plano objetivo com riscos, trade-offs, validacao e proximos passos.",
     ]
 
@@ -641,6 +725,7 @@ def render_standard_response(
     evidence_lines = build_evidence_lines(retrieved_chunks)
     request_lines = build_recommended_request(user_question, repo_id, structure, intent)
     normalized_next_steps = [f"- {step}" for step in next_steps[:4]] or ["- Definir proximos passos com o time."]
+    context_quality = "alta" if len(retrieved_chunks) >= 6 else "media" if len(retrieved_chunks) >= 3 else "baixa"
 
     return "\n".join(
         [
@@ -655,6 +740,10 @@ def render_standard_response(
             "",
             "4) Proximos passos",
             *normalized_next_steps,
+            "",
+            "5) Qualidade do contexto",
+            f"- Evidencias recuperadas: {len(retrieved_chunks)}",
+            f"- Confianca de cobertura para esta resposta: {context_quality}",
         ]
     )
 
@@ -741,6 +830,7 @@ def clone_or_update_repo(repo_url: str) -> tuple[str, Path]:
 
 
 def ingest_repo(repo_url: str) -> dict:
+    started_at = time.perf_counter()
     repo_id, repo_path = clone_or_update_repo(repo_url)
     files, coverage = iter_repo_files(repo_path)
 
@@ -795,6 +885,10 @@ def ingest_repo(repo_url: str) -> dict:
         "chunks": chunks,
         "df": dict(df_counter),
         "avg_doc_len": avg_doc_len,
+        "ingestion_metrics": {
+            "duration_seconds": round(time.perf_counter() - started_at, 4),
+            "files_per_second": round(files_processed / max(time.perf_counter() - started_at, 1e-9), 4),
+        },
     }
     save_index(index_data)
     return index_data
@@ -882,21 +976,14 @@ def extract_question_without_url(text: str, repo_url: str) -> str:
 
 def detect_user_intent(question: str) -> str:
     q = question.lower()
+    scores: dict[str, int] = {}
+    for intent, terms in INTENT_KEYWORDS.items():
+        scores[intent] = sum(1 for term in terms if term in q)
 
-    debugging_terms = ["erro", "bug", "falha", "quebra", "stack trace", "exception", "corrigir", "fix"]
-    architecture_terms = ["arquitetura", "estrutura", "componentes", "modulos", "design", "organiza"]
-    implementation_terms = ["implementar", "implemente", "criar", "adicionar", "desenvolver", "codificar", "fazer"]
-    planning_terms = ["plano", "roadmap", "fases", "prioridade", "estimativa", "cronograma"]
-
-    if any(term in q for term in debugging_terms):
-        return "debugging"
-    if any(term in q for term in architecture_terms):
-        return "arquitetura"
-    if any(term in q for term in implementation_terms):
-        return "implementacao"
-    if any(term in q for term in planning_terms):
-        return "planejamento"
-    return "resumo"
+    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    if not ranked or ranked[0][1] == 0:
+        return "resumo"
+    return ranked[0][0]
 
 
 def get_intent_profile(intent: str) -> dict:
