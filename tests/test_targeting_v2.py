@@ -28,17 +28,12 @@ class TargetingV2Tests(unittest.TestCase):
         formatted = teste.render_standard_response(
             raw_answer="Resumo principal.\n\nDetalhes adicionais.",
             retrieved_chunks=chunks,
-            user_question="Explique o projeto",
-            repo_id="demo_repo",
-            structure=structure,
-            intent="arquitetura",
-            next_steps=["Passo 1", "Passo 2"],
         )
 
-        self.assertIn("1) Resumo objetivo", formatted)
-        self.assertIn("2) Evidencias (arquivos/linhas)", formatted)
-        self.assertIn("3) Estrutura do pedido final recomendado ao time", formatted)
-        self.assertIn("4) Proximos passos", formatted)
+        self.assertIn("Resumo principal.", formatted)
+        self.assertIn("Detalhes adicionais.", formatted)
+        self.assertIn("--- Evidencias (arquivos/linhas) ---", formatted)
+        self.assertIn("--- Qualidade do contexto ---", formatted)
         self.assertIn("- src/app.py:10-20", formatted)
 
     def test_build_structure_summary_detects_dotnet(self) -> None:

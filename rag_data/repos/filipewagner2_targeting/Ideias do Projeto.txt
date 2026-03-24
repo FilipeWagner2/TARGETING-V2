@@ -1,5 +1,0 @@
-Ideias para aplicar nas próximas versões (deixar de acordo com as versões no Notion)
-
-1 - Usuário enviou um prompt para a IA, a IA retornou a resposta. Entretanto as vezes queremos responder somente um trecho do que a ia re-
-tornou e por isso, será separado toda a resposta da IA em blocos, fazendo com que o usuário consiga responder, perguntar, ou arrumar um 
-bloco através de uma "subconversa" dentro daquele bloco com a IA.

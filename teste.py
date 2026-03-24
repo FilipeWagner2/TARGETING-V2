@@ -324,21 +324,22 @@ def print_error_message(text: str) -> None:
 
 def print_banner() -> None:
     print_panel(
-        "RAG Chat",
+        "Targeting Chatbot",
         "\n".join(
             [
-                "Chat iniciado.",
+                "Bem vindo ao Targeting Chatbot - seu assistente para explorar e usar repositórios.",
                 "",
-                "Comandos disponiveis:",
+                "Comandos de instrução padrão:",
                 "- ingest <url_github>  -> clona/atualiza e indexa repositorio",
                 "- repos                -> lista repositorios indexados",
                 "- use <repo_id>        -> seleciona repositorio ativo",
                 "- coverage             -> mostra cobertura do repo ativo",
                 "- structure            -> mostra estrutura do repo ativo",
                 "- help                 -> mostra ajuda rapida",
-                "- sair                 -> encerra",
+                "- ctrl + c               -> encerra",
                 "",
-                "Dica: cole uma frase com URL do GitHub e o sistema indexa automaticamente.",
+                "Dica: - EM LINHAS DIFERENTES - ",
+                "Insira o comando 'ingest <URL>', no padrão correto, que o sistema indexa automaticamente.",
                 "Perguntas normais usam o repositorio ativo como contexto.",
             ]
         ),
@@ -715,35 +716,20 @@ def build_recommended_request(user_question: str, repo_id: str, structure: dict,
 def render_standard_response(
     raw_answer: str,
     retrieved_chunks: list[dict],
-    user_question: str,
-    repo_id: str,
-    structure: dict,
-    intent: str,
-    next_steps: list[str],
 ) -> str:
-    summary = first_paragraph(raw_answer)
     evidence_lines = build_evidence_lines(retrieved_chunks)
-    request_lines = build_recommended_request(user_question, repo_id, structure, intent)
-    normalized_next_steps = [f"- {step}" for step in next_steps[:4]] or ["- Definir proximos passos com o time."]
     context_quality = "alta" if len(retrieved_chunks) >= 6 else "media" if len(retrieved_chunks) >= 3 else "baixa"
 
     return "\n".join(
         [
-            "1) Resumo objetivo",
-            summary,
+            raw_answer.strip(),
             "",
-            "2) Evidencias (arquivos/linhas)",
+            "--- Evidencias (arquivos/linhas) ---",
             *evidence_lines,
             "",
-            "3) Estrutura do pedido final recomendado ao time",
-            *request_lines,
-            "",
-            "4) Proximos passos",
-            *normalized_next_steps,
-            "",
-            "5) Qualidade do contexto",
+            "--- Qualidade do contexto ---",
             f"- Evidencias recuperadas: {len(retrieved_chunks)}",
-            f"- Confianca de cobertura para esta resposta: {context_quality}",
+            f"- Confianca de cobertura: {context_quality}",
         ]
     )
 
@@ -1186,11 +1172,6 @@ def run_chat() -> None:
         standardized = render_standard_response(
             raw_answer=raw_answer,
             retrieved_chunks=retrieved,
-            user_question=user_input,
-            repo_id=active_repo_id or "repo_desconhecido",
-            structure=active_index.get("structure", {}),
-            intent=intent,
-            next_steps=intent_profile.get("next_steps", []),
         )
         print_agent_message(standardized)
 
