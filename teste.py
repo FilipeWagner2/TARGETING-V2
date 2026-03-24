@@ -543,6 +543,66 @@ def format_structure_summary(structure: dict) -> str:
     )
 
 
+def first_paragraph(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return "Sem conteudo retornado pelo modelo."
+
+    blocks = [block.strip() for block in re.split(r"\n\s*\n", stripped) if block.strip()]
+    if blocks:
+        return blocks[0]
+
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    return " ".join(lines[:5]) if lines else "Sem conteudo retornado pelo modelo."
+
+
+def build_evidence_lines(chunks: list[dict], max_items: int = 6) -> list[str]:
+    if not chunks:
+        return ["- Nenhuma evidencia recuperada no indice local."]
+
+    lines: list[str] = []
+    for chunk in chunks[:max_items]:
+        lines.append(
+            f"- {chunk.get('path', 'arquivo_desconhecido')}:{chunk.get('start_line', 0)}-{chunk.get('end_line', 0)}"
+        )
+    return lines
+
+
+def build_recommended_request(user_question: str, repo_id: str, structure: dict) -> list[str]:
+    top_dirs = structure.get("top_level_directories", [])
+    dirs_text = ", ".join(top_dirs[:5]) or "raiz"
+
+    return [
+        f"- Contexto: analisar o repositorio {repo_id} com foco no pedido: {user_question}",
+        f"- Escopo sugerido: priorizar areas {dirs_text} e pontos de entrada relevantes.",
+        "- Entregavel: plano objetivo com riscos, trade-offs, validacao e proximos passos.",
+    ]
+
+
+def render_standard_response(raw_answer: str, retrieved_chunks: list[dict], user_question: str, repo_id: str, structure: dict) -> str:
+    summary = first_paragraph(raw_answer)
+    evidence_lines = build_evidence_lines(retrieved_chunks)
+    request_lines = build_recommended_request(user_question, repo_id, structure)
+
+    return "\n".join(
+        [
+            "1) Resumo objetivo",
+            summary,
+            "",
+            "2) Evidencias (arquivos/linhas)",
+            *evidence_lines,
+            "",
+            "3) Estrutura do pedido final recomendado ao time",
+            *request_lines,
+            "",
+            "4) Proximos passos",
+            "- Validar os pontos listados com inspeção direta dos arquivos citados.",
+            "- Refinar requisitos e definir prioridade de implementação.",
+            "- Executar ajustes em fases pequenas e medir regressao.",
+        ]
+    )
+
+
 def bm25_score(query_tokens: list[str], doc_tf: dict[str, int], doc_len: int, avg_doc_len: float, df: dict[str, int], n_docs: int) -> float:
     if not query_tokens or not doc_tf:
         return 0.0
@@ -951,4 +1011,12 @@ while True:
         messages=[{"role": "user", "content": prompt}],
     )
 
-    print_agent_message(response.choices[0].message.content or "Sem conteudo retornado.")
+    raw_answer = response.choices[0].message.content or "Sem conteudo retornado."
+    standardized = render_standard_response(
+        raw_answer=raw_answer,
+        retrieved_chunks=retrieved,
+        user_question=user_input,
+        repo_id=active_repo_id or "repo_desconhecido",
+        structure=active_index.get("structure", {}),
+    )
+    print_agent_message(standardized)
