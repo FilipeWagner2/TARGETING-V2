@@ -37,19 +37,31 @@ IGNORED_DIRS = {
 SUPPORTED_EXTENSIONS = {
     ".py",
     ".md",
+    ".mdx",
     ".txt",
+    ".rst",
     ".json",
     ".yaml",
     ".yml",
     ".toml",
     ".ini",
     ".cfg",
+    ".env",
+    ".conf",
+    ".config",
+    ".lock",
+    ".csv",
+    ".tsv",
+    ".ipynb",
     ".js",
     ".ts",
     ".tsx",
     ".jsx",
+    ".mjs",
+    ".cjs",
     ".java",
     ".kt",
+    ".gradle",
     ".go",
     ".rs",
     ".c",
@@ -62,11 +74,48 @@ SUPPORTED_EXTENSIONS = {
     ".swift",
     ".sql",
     ".sh",
+    ".bash",
+    ".zsh",
     ".ps1",
+    ".bat",
+    ".cmd",
     ".html",
     ".css",
+    ".scss",
+    ".sass",
+    ".less",
     ".xml",
     ".dockerfile",
+    ".gitignore",
+    ".gitattributes",
+    ".editorconfig",
+    ".csproj",
+    ".sln",
+    ".props",
+    ".targets",
+    ".tf",
+    ".hcl",
+    ".proto",
+}
+
+SUPPORTED_FILENAMES = {
+    "dockerfile",
+    "makefile",
+    "readme",
+    "readme.md",
+    "readme.txt",
+    "license",
+    "changelog",
+    "requirements.txt",
+    "package.json",
+    "pyproject.toml",
+    "poetry.lock",
+    "pipfile",
+    "pipfile.lock",
+    "go.mod",
+    "go.sum",
+    "cargo.toml",
+    "cargo.lock",
 }
 
 GITHUB_REPO_URL_PATTERN = re.compile(
@@ -164,6 +213,7 @@ def print_banner() -> None:
                 "- ingest <url_github>  -> clona/atualiza e indexa repositorio",
                 "- repos                -> lista repositorios indexados",
                 "- use <repo_id>        -> seleciona repositorio ativo",
+                "- coverage             -> mostra cobertura do repo ativo",
                 "- help                 -> mostra ajuda rapida",
                 "- sair                 -> encerra",
                 "",
@@ -259,23 +309,121 @@ def chunk_lines(text: str, max_chars: int = MAX_CHUNK_CHARS, overlap_lines: int 
     return chunks
 
 
-def iter_repo_files(repo_path: Path) -> list[Path]:
+def file_type_label(file_path: Path) -> str:
+    name_lower = file_path.name.lower()
+    if name_lower in SUPPORTED_FILENAMES:
+        return name_lower
+    suffix = file_path.suffix.lower()
+    if suffix:
+        return suffix
+    if name_lower.startswith("readme"):
+        return "readme"
+    return "<sem_extensao>"
+
+
+def is_supported_file(file_path: Path) -> bool:
+    name_lower = file_path.name.lower()
+    suffix = file_path.suffix.lower()
+    return (
+        name_lower in SUPPORTED_FILENAMES
+        or name_lower.startswith("readme")
+        or suffix in SUPPORTED_EXTENSIONS
+    )
+
+
+def iter_repo_files(repo_path: Path) -> tuple[list[Path], dict]:
     files: list[Path] = []
+    skipped_reasons: Counter[str] = Counter()
+    by_type: dict[str, dict[str, int]] = {}
+
+    def bump_file_type(file_type: str, key: str) -> None:
+        data = by_type.setdefault(
+            file_type,
+            {"vistos": 0, "candidatos": 0, "indexados": 0, "ignorados": 0},
+        )
+        data[key] += 1
+
+    total_seen = 0
+    skipped_dirs = 0
+
     for root, dirs, filenames in os.walk(repo_path):
+        original_dir_count = len(dirs)
         dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+        skipped_dirs += max(0, original_dir_count - len(dirs))
+
         root_path = Path(root)
         for name in filenames:
+            total_seen += 1
             file_path = root_path / name
-            suffix = file_path.suffix.lower()
-            if suffix not in SUPPORTED_EXTENSIONS and file_path.name.lower() not in {"dockerfile", "makefile", "readme"}:
+            kind = file_type_label(file_path)
+            bump_file_type(kind, "vistos")
+
+            if not is_supported_file(file_path):
+                skipped_reasons["extensao_nao_suportada"] += 1
+                bump_file_type(kind, "ignorados")
                 continue
+
             try:
                 if file_path.stat().st_size > MAX_FILE_SIZE_BYTES:
+                    skipped_reasons["arquivo_muito_grande"] += 1
+                    bump_file_type(kind, "ignorados")
                     continue
             except OSError:
+                skipped_reasons["falha_stat_arquivo"] += 1
+                bump_file_type(kind, "ignorados")
                 continue
+
             files.append(file_path)
-    return files
+            bump_file_type(kind, "candidatos")
+
+    coverage = {
+        "total_arquivos_vistos": total_seen,
+        "pastas_ignoradas": skipped_dirs,
+        "arquivos_candidatos": len(files),
+        "arquivos_indexados": 0,
+        "arquivos_ignorados_por_motivo": dict(skipped_reasons),
+        "por_tipo": by_type,
+    }
+    return files, coverage
+
+
+def mark_coverage_indexed_file(coverage: dict, file_path: Path) -> None:
+    file_type = file_type_label(file_path)
+    type_stats = coverage.get("por_tipo", {}).setdefault(
+        file_type,
+        {"vistos": 0, "candidatos": 0, "indexados": 0, "ignorados": 0},
+    )
+    type_stats["indexados"] += 1
+    coverage["arquivos_indexados"] = int(coverage.get("arquivos_indexados", 0)) + 1
+
+
+def mark_coverage_skipped(coverage: dict, file_path: Path, reason: str) -> None:
+    ignored = Counter(coverage.get("arquivos_ignorados_por_motivo", {}))
+    ignored[reason] += 1
+    coverage["arquivos_ignorados_por_motivo"] = dict(ignored)
+
+    file_type = file_type_label(file_path)
+    type_stats = coverage.get("por_tipo", {}).setdefault(
+        file_type,
+        {"vistos": 0, "candidatos": 0, "indexados": 0, "ignorados": 0},
+    )
+    type_stats["ignorados"] += 1
+
+
+def summarize_coverage(coverage: dict) -> str:
+    ignored = coverage.get("arquivos_ignorados_por_motivo", {})
+    ignored_sorted = sorted(ignored.items(), key=lambda item: item[1], reverse=True)
+    ignored_text = ", ".join(f"{reason}={count}" for reason, count in ignored_sorted[:5])
+    if not ignored_text:
+        ignored_text = "nenhum"
+
+    return (
+        f"vistos={coverage.get('total_arquivos_vistos', 0)}, "
+        f"candidatos={coverage.get('arquivos_candidatos', 0)}, "
+        f"indexados={coverage.get('arquivos_indexados', 0)}, "
+        f"pastas_ignoradas={coverage.get('pastas_ignoradas', 0)}, "
+        f"ignorados_top={ignored_text}"
+    )
 
 
 def bm25_score(query_tokens: list[str], doc_tf: dict[str, int], doc_len: int, avg_doc_len: float, df: dict[str, int], n_docs: int) -> float:
@@ -361,7 +509,7 @@ def clone_or_update_repo(repo_url: str) -> tuple[str, Path]:
 
 def ingest_repo(repo_url: str) -> dict:
     repo_id, repo_path = clone_or_update_repo(repo_url)
-    files = iter_repo_files(repo_path)
+    files, coverage = iter_repo_files(repo_path)
 
     chunks: list[dict] = []
     df_counter: Counter[str] = Counter()
@@ -370,13 +518,16 @@ def ingest_repo(repo_url: str) -> dict:
     for file_path in files:
         text = read_text_file(file_path)
         if not text:
+            mark_coverage_skipped(coverage, file_path, "arquivo_nao_textual_ou_inlegivel")
             continue
         relative = file_path.relative_to(repo_path).as_posix()
         line_chunks = chunk_lines(text)
         if not line_chunks:
+            mark_coverage_skipped(coverage, file_path, "sem_conteudo_util_apos_chunk")
             continue
 
         files_processed += 1
+        mark_coverage_indexed_file(coverage, file_path)
         for content, start_line, end_line in line_chunks:
             tf_counter = Counter(tokenize(content))
             if not tf_counter:
@@ -404,6 +555,7 @@ def ingest_repo(repo_url: str) -> dict:
         "repo_url": repo_url,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files_processed": files_processed,
+        "coverage": coverage,
         "chunks": chunks,
         "df": dict(df_counter),
         "avg_doc_len": avg_doc_len,
@@ -532,7 +684,8 @@ while True:
                 "Indexacao concluida! "
                 f"repo_id={active_repo_id}, "
                 f"arquivos={active_index['files_processed']}, "
-                f"chunks={len(active_index['chunks'])}."
+                f"chunks={len(active_index['chunks'])}.\n"
+                f"Cobertura: {summarize_coverage(active_index.get('coverage', {}))}"
             )
         except Exception as exc:
             print_error_message(f"Falha na ingestao: {exc}")
@@ -566,11 +719,43 @@ while True:
         print_system_message(f"Repositorio ativo: {active_repo_id}")
         continue
 
+    if user_input.lower() == "coverage":
+        if not active_index:
+            print_error_message("Nenhum repositorio ativo. Use 'ingest <url>' ou 'use <repo_id>'.")
+            continue
+        coverage = active_index.get("coverage", {})
+        if not coverage:
+            print_system_message(
+                "Este indice nao possui dados de cobertura (provavelmente gerado em versao anterior)."
+            )
+            continue
+
+        top_types = sorted(
+            coverage.get("por_tipo", {}).items(),
+            key=lambda item: item[1].get("indexados", 0),
+            reverse=True,
+        )[:10]
+        lines = [
+            "Cobertura do repositorio ativo:",
+            summarize_coverage(coverage),
+            "",
+            "Top tipos por arquivos indexados:",
+        ]
+        for file_type, stats in top_types:
+            lines.append(
+                f"- {file_type}: vistos={stats.get('vistos', 0)}, "
+                f"candidatos={stats.get('candidatos', 0)}, "
+                f"indexados={stats.get('indexados', 0)}, "
+                f"ignorados={stats.get('ignorados', 0)}"
+            )
+        print_system_message("\n".join(lines))
+        continue
+
     if user_input.lower() == "help":
         print_system_message(
             "\n".join(
                 [
-                    "Comandos: ingest <url_github>, repos, use <repo_id>, help, sair.",
+                    "Comandos: ingest <url_github>, repos, use <repo_id>, coverage, help, sair.",
                     "",
                     "Exemplo natural:",
                     "Acesse https://github.com/owner/repo e me explique a arquitetura.",
@@ -589,7 +774,8 @@ while True:
                 "Repositorio pronto para consulta! "
                 f"repo_id={active_repo_id}, "
                 f"arquivos={active_index['files_processed']}, "
-                f"chunks={len(active_index['chunks'])}."
+                f"chunks={len(active_index['chunks'])}.\n"
+                f"Cobertura: {summarize_coverage(active_index.get('coverage', {}))}"
             )
         except Exception as exc:
             print_error_message(f"Falha na ingestao automatica: {exc}")
