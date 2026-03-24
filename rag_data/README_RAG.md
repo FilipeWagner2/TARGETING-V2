@@ -70,3 +70,47 @@ Fluxo implementado no teste.py:
 ## Resumo final
 No seu projeto, RAG significa: usar o conteudo real dos repositorios como base das respostas.
 Assim, o agente deixa de responder de forma generica e passa a responder com fundamento tecnico no codigo analisado.
+
+## Novidades da V2
+- Cobertura de ingestao ampliada: mais tipos de arquivos de codigo e configuracao entram como candidatos.
+- Relatorio de cobertura: o indice salva estatisticas de arquivos vistos, candidatos, indexados e ignorados por motivo.
+- Entendimento estrutural explicito: o pipeline salva resumo estrutural com diretorios, linguagens, sinais de framework e entrypoints.
+- Resposta padronizada: a saida final segue secoes fixas e consistentes.
+- Adaptacao por intencao: classificacao simples de intencao ajusta profundidade de recuperacao e orientacao da resposta.
+
+## Comandos V2
+- ingest <url_github>: clona/atualiza e indexa repositorio
+- repos: lista repositorios indexados
+- use <repo_id>: define repositorio ativo
+- coverage: mostra relatorio de cobertura do repositorio ativo
+- structure: mostra resumo estrutural do repositorio ativo
+- help: mostra ajuda
+- sair: encerra
+
+## Exemplo rapido de uso
+1. Ingerir repositorio:
+  ingest https://github.com/octocat/Hello-World
+2. Ver cobertura:
+  coverage
+3. Ver estrutura:
+  structure
+4. Fazer pergunta:
+  Explique a arquitetura e sugira proximos passos.
+
+## Como validar localmente
+1. Executar testes de regressao:
+  python -m unittest discover -s tests -v
+2. Executar fluxo CLI com comandos:
+  python teste.py
+3. Validar indice gerado em rag_data/indexes/<repo_id>.json:
+  - campo coverage presente
+  - campo structure presente
+
+## Evidencias esperadas no indice
+- coverage.total_arquivos_vistos
+- coverage.arquivos_candidatos
+- coverage.arquivos_indexados
+- coverage.arquivos_ignorados_por_motivo
+- structure.top_level_directories
+- structure.languages
+- structure.framework_signals

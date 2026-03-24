@@ -885,7 +885,7 @@ def detect_user_intent(question: str) -> str:
 
     debugging_terms = ["erro", "bug", "falha", "quebra", "stack trace", "exception", "corrigir", "fix"]
     architecture_terms = ["arquitetura", "estrutura", "componentes", "modulos", "design", "organiza"]
-    implementation_terms = ["implementar", "criar", "adicionar", "desenvolver", "codificar", "fazer"]
+    implementation_terms = ["implementar", "implemente", "criar", "adicionar", "desenvolver", "codificar", "fazer"]
     planning_terms = ["plano", "roadmap", "fases", "prioridade", "estimativa", "cronograma"]
 
     if any(term in q for term in debugging_terms):
@@ -903,205 +903,210 @@ def get_intent_profile(intent: str) -> dict:
     return INTENT_PROFILES.get(intent, INTENT_PROFILES["resumo"])
 
 
-api_key = get_api_key()
-if not api_key:
-    raise ValueError("Defina a variavel de ambiente XAI_API_KEY antes de executar.")
+def run_chat() -> None:
+    api_key = get_api_key()
+    if not api_key:
+        raise ValueError("Defina a variavel de ambiente XAI_API_KEY antes de executar.")
 
-ensure_dirs()
-enable_windows_ansi()
+    ensure_dirs()
+    enable_windows_ansi()
 
-client = OpenAI(
-    api_key=api_key,
-    base_url="https://api.x.ai/v1",
-)
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.x.ai/v1",
+    )
 
-print_banner()
+    print_banner()
 
-active_repo_id: str | None = None
-active_index: dict | None = None
+    active_repo_id: str | None = None
+    active_index: dict | None = None
 
-while True:
-    user_input = input(f"{TermColors.BOLD}{TermColors.CYAN}Voce > {TermColors.RESET}").strip()
-    if user_input.lower() == "sair":
-        print_system_message("Encerrando o chat. Ate mais!")
-        break
-    if not user_input:
-        continue
-
-    print_user_message(user_input)
-
-    if user_input.lower().startswith("ingest "):
-        repo_url = user_input[7:].strip()
-        if not repo_url:
-            print_error_message("Informe a URL do repositorio.")
+    while True:
+        user_input = input(f"{TermColors.BOLD}{TermColors.CYAN}Voce > {TermColors.RESET}").strip()
+        if user_input.lower() == "sair":
+            print_system_message("Encerrando o chat. Ate mais!")
+            break
+        if not user_input:
             continue
-        try:
-            print_system_message("Indexando repositorio... isso pode levar alguns minutos.")
-            active_index = ingest_repo(repo_url)
-            active_repo_id = active_index["repo_id"]
+
+        print_user_message(user_input)
+
+        if user_input.lower().startswith("ingest "):
+            repo_url = user_input[7:].strip()
+            if not repo_url:
+                print_error_message("Informe a URL do repositorio.")
+                continue
+            try:
+                print_system_message("Indexando repositorio... isso pode levar alguns minutos.")
+                active_index = ingest_repo(repo_url)
+                active_repo_id = active_index["repo_id"]
+                print_system_message(
+                    "Indexacao concluida! "
+                    f"repo_id={active_repo_id}, "
+                    f"arquivos={active_index['files_processed']}, "
+                    f"chunks={len(active_index['chunks'])}.\n"
+                    f"Cobertura: {summarize_coverage(active_index.get('coverage', {}))}"
+                )
+            except Exception as exc:
+                print_error_message(f"Falha na ingestao: {exc}")
+            continue
+
+        if user_input.lower() == "repos":
+            repos = list_indexed_repos()
+            if not repos:
+                print_system_message("Nenhum repositorio indexado ainda.")
+                continue
+            lines = ["Repositorios indexados:"]
+            for repo in repos:
+                marker = " (ativo)" if repo["repo_id"] == active_repo_id else ""
+                lines.append(
+                    f"- {repo['repo_id']} | chunks={repo['chunks']} | url={repo['repo_url']}{marker}"
+                )
+            print_system_message("\n".join(lines))
+            continue
+
+        if user_input.lower().startswith("use "):
+            repo_id = user_input[4:].strip().lower()
+            if not repo_id:
+                print_error_message("Informe o repo_id.")
+                continue
+            loaded = load_index(repo_id)
+            if not loaded:
+                print_error_message("Repo nao encontrado no indice local. Use 'repos' para listar.")
+                continue
+            active_repo_id = repo_id
+            active_index = loaded
+            print_system_message(f"Repositorio ativo: {active_repo_id}")
+            continue
+
+        if user_input.lower() == "coverage":
+            if not active_index:
+                print_error_message("Nenhum repositorio ativo. Use 'ingest <url>' ou 'use <repo_id>'.")
+                continue
+            coverage = active_index.get("coverage", {})
+            if not coverage:
+                print_system_message(
+                    "Este indice nao possui dados de cobertura (provavelmente gerado em versao anterior)."
+                )
+                continue
+
+            top_types = sorted(
+                coverage.get("por_tipo", {}).items(),
+                key=lambda item: item[1].get("indexados", 0),
+                reverse=True,
+            )[:10]
+            lines = [
+                "Cobertura do repositorio ativo:",
+                summarize_coverage(coverage),
+                "",
+                "Top tipos por arquivos indexados:",
+            ]
+            for file_type, stats in top_types:
+                lines.append(
+                    f"- {file_type}: vistos={stats.get('vistos', 0)}, "
+                    f"candidatos={stats.get('candidatos', 0)}, "
+                    f"indexados={stats.get('indexados', 0)}, "
+                    f"ignorados={stats.get('ignorados', 0)}"
+                )
+            print_system_message("\n".join(lines))
+            continue
+
+        if user_input.lower() == "structure":
+            if not active_index:
+                print_error_message("Nenhum repositorio ativo. Use 'ingest <url>' ou 'use <repo_id>'.")
+                continue
+            structure = active_index.get("structure", {})
+            if not structure:
+                print_system_message(
+                    "Este indice nao possui resumo estrutural (provavelmente gerado em versao anterior)."
+                )
+                continue
+            print_system_message("Resumo estrutural do repositorio ativo:\n" + format_structure_summary(structure))
+            continue
+
+        if user_input.lower() == "help":
             print_system_message(
-                "Indexacao concluida! "
-                f"repo_id={active_repo_id}, "
-                f"arquivos={active_index['files_processed']}, "
-                f"chunks={len(active_index['chunks'])}.\n"
-                f"Cobertura: {summarize_coverage(active_index.get('coverage', {}))}"
+                "\n".join(
+                    [
+                        "Comandos: ingest <url_github>, repos, use <repo_id>, coverage, structure, help, sair.",
+                        "",
+                        "Exemplo natural:",
+                        "Acesse https://github.com/owner/repo e me explique a arquitetura.",
+                    ]
+                )
             )
-        except Exception as exc:
-            print_error_message(f"Falha na ingestao: {exc}")
-        continue
-
-    if user_input.lower() == "repos":
-        repos = list_indexed_repos()
-        if not repos:
-            print_system_message("Nenhum repositorio indexado ainda.")
             continue
-        lines = ["Repositorios indexados:"]
-        for repo in repos:
-            marker = " (ativo)" if repo["repo_id"] == active_repo_id else ""
-            lines.append(
-                f"- {repo['repo_id']} | chunks={repo['chunks']} | url={repo['repo_url']}{marker}"
-            )
-        print_system_message("\n".join(lines))
-        continue
 
-    if user_input.lower().startswith("use "):
-        repo_id = user_input[4:].strip().lower()
-        if not repo_id:
-            print_error_message("Informe o repo_id.")
-            continue
-        loaded = load_index(repo_id)
-        if not loaded:
-            print_error_message("Repo nao encontrado no indice local. Use 'repos' para listar.")
-            continue
-        active_repo_id = repo_id
-        active_index = loaded
-        print_system_message(f"Repositorio ativo: {active_repo_id}")
-        continue
+        inferred_repo_url = extract_github_repo_url(user_input)
+        if inferred_repo_url:
+            try:
+                print_system_message("URL de repositorio detectada. Iniciando ingestao automatica...")
+                active_index = ingest_repo(inferred_repo_url)
+                active_repo_id = active_index["repo_id"]
+                print_system_message(
+                    "Repositorio pronto para consulta! "
+                    f"repo_id={active_repo_id}, "
+                    f"arquivos={active_index['files_processed']}, "
+                    f"chunks={len(active_index['chunks'])}.\n"
+                    f"Cobertura: {summarize_coverage(active_index.get('coverage', {}))}"
+                )
+            except Exception as exc:
+                print_error_message(f"Falha na ingestao automatica: {exc}")
+                continue
 
-    if user_input.lower() == "coverage":
+            remaining_question = extract_question_without_url(user_input, inferred_repo_url)
+            if not remaining_question:
+                print_system_message("Agora faca sua pergunta sobre esse repositorio.")
+                continue
+
+            print_system_message(f"Pergunta interpretada: {remaining_question}")
+            user_input = remaining_question
+
         if not active_index:
-            print_error_message("Nenhum repositorio ativo. Use 'ingest <url>' ou 'use <repo_id>'.")
-            continue
-        coverage = active_index.get("coverage", {})
-        if not coverage:
-            print_system_message(
-                "Este indice nao possui dados de cobertura (provavelmente gerado em versao anterior)."
+            response = client.chat.completions.create(
+                model="grok-4-1-fast",
+                messages=[{"role": "user", "content": user_input}],
             )
+            print_agent_message(response.choices[0].message.content or "Sem conteudo retornado.")
             continue
 
-        top_types = sorted(
-            coverage.get("por_tipo", {}).items(),
-            key=lambda item: item[1].get("indexados", 0),
-            reverse=True,
-        )[:10]
-        lines = [
-            "Cobertura do repositorio ativo:",
-            summarize_coverage(coverage),
-            "",
-            "Top tipos por arquivos indexados:",
-        ]
-        for file_type, stats in top_types:
-            lines.append(
-                f"- {file_type}: vistos={stats.get('vistos', 0)}, "
-                f"candidatos={stats.get('candidatos', 0)}, "
-                f"indexados={stats.get('indexados', 0)}, "
-                f"ignorados={stats.get('ignorados', 0)}"
-            )
-        print_system_message("\n".join(lines))
-        continue
+        intent = detect_user_intent(user_input)
+        intent_profile = get_intent_profile(intent)
 
-    if user_input.lower() == "structure":
-        if not active_index:
-            print_error_message("Nenhum repositorio ativo. Use 'ingest <url>' ou 'use <repo_id>'.")
-            continue
-        structure = active_index.get("structure", {})
-        if not structure:
-            print_system_message(
-                "Este indice nao possui resumo estrutural (provavelmente gerado em versao anterior)."
-            )
-            continue
-        print_system_message("Resumo estrutural do repositorio ativo:\n" + format_structure_summary(structure))
-        continue
-
-    if user_input.lower() == "help":
-        print_system_message(
-            "\n".join(
-                [
-                    "Comandos: ingest <url_github>, repos, use <repo_id>, coverage, structure, help, sair.",
-                    "",
-                    "Exemplo natural:",
-                    "Acesse https://github.com/owner/repo e me explique a arquitetura.",
-                ]
-            )
+        retrieved = retrieve_chunks(active_index, user_input, top_k=int(intent_profile.get("top_k", TOP_K)))
+        context_text = build_context(retrieved)
+        structure_text = format_structure_summary(active_index.get("structure", {}))
+        prompt = (
+            "Voce e um agente de analise de repositorios. "
+            "Use o contexto recuperado e o resumo estrutural para responder com foco tecnico e acao objetiva.\n\n"
+            f"Intencao classificada: {intent}. Diretriz: {intent_profile.get('guidance', '')}.\n\n"
+            "Formato da resposta:\n"
+            "1) Resumo objetivo\n"
+            "2) Evidencias (arquivos/linhas)\n"
+            "3) Estrutura do pedido final recomendado ao time\n"
+            "4) Proximos passos\n\n"
+            f"Pergunta do usuario:\n{user_input}\n\n"
+            f"Resumo estrutural do repositorio ({active_repo_id}):\n{structure_text}\n\n"
+            f"Contexto recuperado do repositorio ({active_repo_id}):\n{context_text}"
         )
-        continue
 
-    inferred_repo_url = extract_github_repo_url(user_input)
-    if inferred_repo_url:
-        try:
-            print_system_message("URL de repositorio detectada. Iniciando ingestao automatica...")
-            active_index = ingest_repo(inferred_repo_url)
-            active_repo_id = active_index["repo_id"]
-            print_system_message(
-                "Repositorio pronto para consulta! "
-                f"repo_id={active_repo_id}, "
-                f"arquivos={active_index['files_processed']}, "
-                f"chunks={len(active_index['chunks'])}.\n"
-                f"Cobertura: {summarize_coverage(active_index.get('coverage', {}))}"
-            )
-        except Exception as exc:
-            print_error_message(f"Falha na ingestao automatica: {exc}")
-            continue
-
-        remaining_question = extract_question_without_url(user_input, inferred_repo_url)
-        if not remaining_question:
-            print_system_message("Agora faca sua pergunta sobre esse repositorio.")
-            continue
-
-        print_system_message(f"Pergunta interpretada: {remaining_question}")
-        user_input = remaining_question
-
-    if not active_index:
         response = client.chat.completions.create(
             model="grok-4-1-fast",
-            messages=[{"role": "user", "content": user_input}],
+            messages=[{"role": "user", "content": prompt}],
         )
-        print_agent_message(response.choices[0].message.content or "Sem conteudo retornado.")
-        continue
 
-    intent = detect_user_intent(user_input)
-    intent_profile = get_intent_profile(intent)
+        raw_answer = response.choices[0].message.content or "Sem conteudo retornado."
+        standardized = render_standard_response(
+            raw_answer=raw_answer,
+            retrieved_chunks=retrieved,
+            user_question=user_input,
+            repo_id=active_repo_id or "repo_desconhecido",
+            structure=active_index.get("structure", {}),
+            intent=intent,
+            next_steps=intent_profile.get("next_steps", []),
+        )
+        print_agent_message(standardized)
 
-    retrieved = retrieve_chunks(active_index, user_input, top_k=int(intent_profile.get("top_k", TOP_K)))
-    context_text = build_context(retrieved)
-    structure_text = format_structure_summary(active_index.get("structure", {}))
-    prompt = (
-        "Voce e um agente de analise de repositorios. "
-        "Use o contexto recuperado e o resumo estrutural para responder com foco tecnico e acao objetiva.\n\n"
-        f"Intencao classificada: {intent}. Diretriz: {intent_profile.get('guidance', '')}.\n\n"
-        "Formato da resposta:\n"
-        "1) Resumo objetivo\n"
-        "2) Evidencias (arquivos/linhas)\n"
-        "3) Estrutura do pedido final recomendado ao time\n"
-        "4) Proximos passos\n\n"
-        f"Pergunta do usuario:\n{user_input}\n\n"
-        f"Resumo estrutural do repositorio ({active_repo_id}):\n{structure_text}\n\n"
-        f"Contexto recuperado do repositorio ({active_repo_id}):\n{context_text}"
-    )
 
-    response = client.chat.completions.create(
-        model="grok-4-1-fast",
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    raw_answer = response.choices[0].message.content or "Sem conteudo retornado."
-    standardized = render_standard_response(
-        raw_answer=raw_answer,
-        retrieved_chunks=retrieved,
-        user_question=user_input,
-        repo_id=active_repo_id or "repo_desconhecido",
-        structure=active_index.get("structure", {}),
-        intent=intent,
-        next_steps=intent_profile.get("next_steps", []),
-    )
-    print_agent_message(standardized)
+if __name__ == "__main__":
+    run_chat()

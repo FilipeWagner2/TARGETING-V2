@@ -1,0 +1,67 @@
+import unittest
+
+import teste
+
+
+class TargetingV2Tests(unittest.TestCase):
+    def test_detect_user_intent(self) -> None:
+        self.assertEqual(teste.detect_user_intent("Tem um erro no controller e preciso corrigir"), "debugging")
+        self.assertEqual(teste.detect_user_intent("Explique a arquitetura e os modulos"), "arquitetura")
+        self.assertEqual(teste.detect_user_intent("Implemente um endpoint novo"), "implementacao")
+
+    def test_render_standard_response_has_fixed_sections(self) -> None:
+        chunks = [
+            {"path": "src/app.py", "start_line": 10, "end_line": 20},
+            {"path": "README.md", "start_line": 1, "end_line": 8},
+        ]
+        structure = {
+            "repo_id": "demo_repo",
+            "total_indexed_files": 2,
+            "top_level_directories": ["src"],
+            "top_level_files": ["README.md"],
+            "languages": {"Python": 1, "Markdown": 1},
+            "framework_signals": ["python-project"],
+            "entrypoints": ["src/app.py"],
+        }
+
+        formatted = teste.render_standard_response(
+            raw_answer="Resumo principal.\n\nDetalhes adicionais.",
+            retrieved_chunks=chunks,
+            user_question="Explique o projeto",
+            repo_id="demo_repo",
+            structure=structure,
+            intent="arquitetura",
+            next_steps=["Passo 1", "Passo 2"],
+        )
+
+        self.assertIn("1) Resumo objetivo", formatted)
+        self.assertIn("2) Evidencias (arquivos/linhas)", formatted)
+        self.assertIn("3) Estrutura do pedido final recomendado ao time", formatted)
+        self.assertIn("4) Proximos passos", formatted)
+        self.assertIn("- src/app.py:10-20", formatted)
+
+    def test_build_structure_summary_detects_dotnet(self) -> None:
+        indexed_paths = {
+            "Program.cs",
+            "ProjetoCUP.csproj",
+            "Controllers/PacientesController.cs",
+            "README.md",
+        }
+
+        structure = teste.build_structure_summary("cup_repo", indexed_paths)
+
+        self.assertEqual(structure["repo_id"], "cup_repo")
+        self.assertIn("dotnet-project", structure["framework_signals"])
+        self.assertIn("Program.cs", structure["entrypoints"])
+        self.assertGreaterEqual(structure["total_indexed_files"], 4)
+
+    def test_extract_question_without_url(self) -> None:
+        question = teste.extract_question_without_url(
+            "Acesse https://github.com/octocat/Hello-World e me explique a arquitetura",
+            "https://github.com/octocat/Hello-World",
+        )
+        self.assertTrue("arquitetura" in question.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()
