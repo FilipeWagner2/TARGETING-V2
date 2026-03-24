@@ -1,14 +1,14 @@
 import unittest
 from pathlib import Path
 
-import teste
+import targeting_chat
 
 
 class TargetingV2Tests(unittest.TestCase):
     def test_detect_user_intent(self) -> None:
-        self.assertEqual(teste.detect_user_intent("Tem um erro no controller e preciso corrigir"), "debugging")
-        self.assertEqual(teste.detect_user_intent("Explique a arquitetura e os modulos"), "arquitetura")
-        self.assertEqual(teste.detect_user_intent("Implemente um endpoint novo"), "implementacao")
+        self.assertEqual(targeting_chat.detect_user_intent("Tem um erro no controller e preciso corrigir"), "debugging")
+        self.assertEqual(targeting_chat.detect_user_intent("Explique a arquitetura e os modulos"), "arquitetura")
+        self.assertEqual(targeting_chat.detect_user_intent("Implemente um endpoint novo"), "implementacao")
 
     def test_render_standard_response_has_fixed_sections(self) -> None:
         chunks = [
@@ -25,7 +25,7 @@ class TargetingV2Tests(unittest.TestCase):
             "entrypoints": ["src/app.py"],
         }
 
-        formatted = teste.render_standard_response(
+        formatted = targeting_chat.render_standard_response(
             raw_answer="Resumo principal.\n\nDetalhes adicionais.",
             retrieved_chunks=chunks,
         )
@@ -44,7 +44,7 @@ class TargetingV2Tests(unittest.TestCase):
             "README.md",
         }
 
-        structure = teste.build_structure_summary("cup_repo", indexed_paths)
+        structure = targeting_chat.build_structure_summary("cup_repo", indexed_paths)
 
         self.assertEqual(structure["repo_id"], "cup_repo")
         self.assertIn("dotnet-project", structure["framework_signals"])
@@ -52,16 +52,16 @@ class TargetingV2Tests(unittest.TestCase):
         self.assertGreaterEqual(structure["total_indexed_files"], 4)
 
     def test_extract_question_without_url(self) -> None:
-        question = teste.extract_question_without_url(
+        question = targeting_chat.extract_question_without_url(
             "Acesse https://github.com/octocat/Hello-World e me explique a arquitetura",
             "https://github.com/octocat/Hello-World",
         )
         self.assertTrue("arquitetura" in question.lower())
 
     def test_supports_extensionless_file_for_better_coverage(self) -> None:
-        self.assertTrue(teste.is_supported_file(Path("Jenkinsfile")))
-        self.assertTrue(teste.is_supported_file(Path("Procfile")))
-        self.assertTrue(teste.is_supported_file(Path("SCRIPT_SEM_EXTENSAO")))
+        self.assertTrue(targeting_chat.is_supported_file(Path("Jenkinsfile")))
+        self.assertTrue(targeting_chat.is_supported_file(Path("Procfile")))
+        self.assertTrue(targeting_chat.is_supported_file(Path("SCRIPT_SEM_EXTENSAO")))
 
     def test_structure_summary_has_layers_and_key_files(self) -> None:
         indexed_paths = {
@@ -71,7 +71,7 @@ class TargetingV2Tests(unittest.TestCase):
             "Program.cs",
             "README.md",
         }
-        structure = teste.build_structure_summary("repo_demo", indexed_paths)
+        structure = targeting_chat.build_structure_summary("repo_demo", indexed_paths)
         self.assertIn("layers", structure)
         self.assertIn("key_files", structure)
         self.assertTrue(any(name.endswith("Program.cs") for name in structure["key_files"]))

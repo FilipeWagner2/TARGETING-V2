@@ -20,7 +20,7 @@ RAG ajuda porque:
 - permite atualizar conhecimento apenas reindexando o repositorio, sem retreinar modelo.
 
 ## Como o RAG deste projeto foi aplicado
-Fluxo implementado no teste.py:
+Fluxo implementado no targeting_chat.py:
 
 1. Ingestao do repositorio
 - Comando: ingest <url_github>
@@ -103,7 +103,7 @@ Assim, o agente deixa de responder de forma generica e passa a responder com fun
 1. Executar testes de regressao:
   python -m unittest discover -s tests -v
 2. Executar fluxo CLI com comandos:
-  python teste.py
+  python targeting_chat.py
 3. Validar indice gerado em rag_data/indexes/<repo_id>.json:
   - campo coverage presente
   - campo structure presente
