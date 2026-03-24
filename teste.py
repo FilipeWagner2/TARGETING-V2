@@ -118,6 +118,46 @@ SUPPORTED_FILENAMES = {
     "cargo.lock",
 }
 
+LANGUAGE_BY_EXTENSION = {
+    ".py": "Python",
+    ".ipynb": "Python",
+    ".js": "JavaScript",
+    ".mjs": "JavaScript",
+    ".cjs": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".jsx": "JavaScript/React",
+    ".java": "Java",
+    ".kt": "Kotlin",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".c": "C",
+    ".h": "C/C++ Header",
+    ".cpp": "C++",
+    ".hpp": "C++ Header",
+    ".cs": "C#",
+    ".php": "PHP",
+    ".rb": "Ruby",
+    ".swift": "Swift",
+    ".sql": "SQL",
+    ".sh": "Shell",
+    ".ps1": "PowerShell",
+    ".html": "HTML",
+    ".css": "CSS",
+    ".scss": "SCSS",
+    ".less": "LESS",
+    ".xml": "XML",
+    ".json": "JSON",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".md": "Markdown",
+    ".mdx": "Markdown/MDX",
+    ".txt": "Text",
+    ".csproj": "MSBuild",
+    ".sln": "Visual Studio Solution",
+    ".toml": "TOML",
+}
+
 GITHUB_REPO_URL_PATTERN = re.compile(
     r"((?:https?://)?(?:www\.)?github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?)",
     re.IGNORECASE,
@@ -214,6 +254,7 @@ def print_banner() -> None:
                 "- repos                -> lista repositorios indexados",
                 "- use <repo_id>        -> seleciona repositorio ativo",
                 "- coverage             -> mostra cobertura do repo ativo",
+                "- structure            -> mostra estrutura do repo ativo",
                 "- help                 -> mostra ajuda rapida",
                 "- sair                 -> encerra",
                 "",
@@ -426,6 +467,82 @@ def summarize_coverage(coverage: dict) -> str:
     )
 
 
+def build_structure_summary(repo_id: str, indexed_paths: set[str]) -> dict:
+    lower_paths = {path.lower() for path in indexed_paths}
+    top_level_dirs: Counter[str] = Counter()
+    top_level_files: list[str] = []
+    language_counter: Counter[str] = Counter()
+    entrypoints: set[str] = set()
+
+    for path in sorted(indexed_paths):
+        normalized = path.replace("\\", "/")
+        parts = normalized.split("/")
+        if len(parts) == 1:
+            top_level_files.append(parts[0])
+        else:
+            top_level_dirs[parts[0]] += 1
+
+        filename = parts[-1].lower()
+        suffix = Path(filename).suffix.lower()
+        language = LANGUAGE_BY_EXTENSION.get(suffix)
+        if language:
+            language_counter[language] += 1
+
+        if filename in {"main.py", "app.py", "program.cs", "index.js", "server.js", "manage.py"}:
+            entrypoints.add(normalized)
+
+    framework_signals: list[str] = []
+    if any(path.endswith("requirements.txt") or path.endswith("pyproject.toml") for path in lower_paths):
+        framework_signals.append("python-project")
+    if any(path.endswith("package.json") for path in lower_paths):
+        framework_signals.append("node-project")
+    if any(path.endswith(".csproj") or path.endswith(".sln") for path in lower_paths):
+        framework_signals.append("dotnet-project")
+    if any(path.endswith("dockerfile") for path in lower_paths):
+        framework_signals.append("docker-enabled")
+    if any(path.startswith(".github/workflows/") for path in lower_paths):
+        framework_signals.append("github-actions")
+
+    return {
+        "repo_id": repo_id,
+        "total_indexed_files": len(indexed_paths),
+        "top_level_directories": [name for name, _ in top_level_dirs.most_common(12)],
+        "top_level_files": sorted(top_level_files)[:20],
+        "languages": dict(language_counter.most_common()),
+        "framework_signals": framework_signals,
+        "entrypoints": sorted(entrypoints),
+    }
+
+
+def format_structure_summary(structure: dict) -> str:
+    if not structure:
+        return "Resumo estrutural indisponivel."
+
+    dirs = structure.get("top_level_directories", [])
+    files = structure.get("top_level_files", [])
+    languages = structure.get("languages", {})
+    frameworks = structure.get("framework_signals", [])
+    entrypoints = structure.get("entrypoints", [])
+
+    lang_text = ", ".join(f"{name}:{count}" for name, count in list(languages.items())[:8]) or "n/a"
+    dirs_text = ", ".join(dirs[:8]) or "n/a"
+    files_text = ", ".join(files[:8]) or "n/a"
+    frameworks_text = ", ".join(frameworks) or "n/a"
+    entrypoints_text = ", ".join(entrypoints[:8]) or "n/a"
+
+    return "\n".join(
+        [
+            f"repo={structure.get('repo_id', 'n/a')}",
+            f"arquivos_indexados={structure.get('total_indexed_files', 0)}",
+            f"top_dirs={dirs_text}",
+            f"top_files={files_text}",
+            f"linguagens={lang_text}",
+            f"sinais_framework={frameworks_text}",
+            f"entrypoints={entrypoints_text}",
+        ]
+    )
+
+
 def bm25_score(query_tokens: list[str], doc_tf: dict[str, int], doc_len: int, avg_doc_len: float, df: dict[str, int], n_docs: int) -> float:
     if not query_tokens or not doc_tf:
         return 0.0
@@ -514,6 +631,7 @@ def ingest_repo(repo_url: str) -> dict:
     chunks: list[dict] = []
     df_counter: Counter[str] = Counter()
     files_processed = 0
+    indexed_paths: set[str] = set()
 
     for file_path in files:
         text = read_text_file(file_path)
@@ -527,6 +645,7 @@ def ingest_repo(repo_url: str) -> dict:
             continue
 
         files_processed += 1
+        indexed_paths.add(relative)
         mark_coverage_indexed_file(coverage, file_path)
         for content, start_line, end_line in line_chunks:
             tf_counter = Counter(tokenize(content))
@@ -556,6 +675,7 @@ def ingest_repo(repo_url: str) -> dict:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files_processed": files_processed,
         "coverage": coverage,
+        "structure": build_structure_summary(repo_id, indexed_paths),
         "chunks": chunks,
         "df": dict(df_counter),
         "avg_doc_len": avg_doc_len,
@@ -751,11 +871,24 @@ while True:
         print_system_message("\n".join(lines))
         continue
 
+    if user_input.lower() == "structure":
+        if not active_index:
+            print_error_message("Nenhum repositorio ativo. Use 'ingest <url>' ou 'use <repo_id>'.")
+            continue
+        structure = active_index.get("structure", {})
+        if not structure:
+            print_system_message(
+                "Este indice nao possui resumo estrutural (provavelmente gerado em versao anterior)."
+            )
+            continue
+        print_system_message("Resumo estrutural do repositorio ativo:\n" + format_structure_summary(structure))
+        continue
+
     if user_input.lower() == "help":
         print_system_message(
             "\n".join(
                 [
-                    "Comandos: ingest <url_github>, repos, use <repo_id>, coverage, help, sair.",
+                    "Comandos: ingest <url_github>, repos, use <repo_id>, coverage, structure, help, sair.",
                     "",
                     "Exemplo natural:",
                     "Acesse https://github.com/owner/repo e me explique a arquitetura.",
@@ -799,15 +932,17 @@ while True:
 
     retrieved = retrieve_chunks(active_index, user_input, top_k=TOP_K)
     context_text = build_context(retrieved)
+    structure_text = format_structure_summary(active_index.get("structure", {}))
     prompt = (
         "Voce e um agente de analise de repositorios. "
-        "Use o contexto recuperado para responder com foco tecnico e acao objetiva.\n\n"
+        "Use o contexto recuperado e o resumo estrutural para responder com foco tecnico e acao objetiva.\n\n"
         "Formato da resposta:\n"
         "1) Resumo objetivo\n"
         "2) Evidencias (arquivos/linhas)\n"
         "3) Estrutura do pedido final recomendado ao time\n"
         "4) Proximos passos\n\n"
         f"Pergunta do usuario:\n{user_input}\n\n"
+        f"Resumo estrutural do repositorio ({active_repo_id}):\n{structure_text}\n\n"
         f"Contexto recuperado do repositorio ({active_repo_id}):\n{context_text}"
     )
 
