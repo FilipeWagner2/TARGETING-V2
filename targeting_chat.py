@@ -336,7 +336,7 @@ def print_banner() -> None:
                 "- coverage             -> mostra cobertura do repo ativo",
                 "- structure            -> mostra estrutura do repo ativo",
                 "- help                 -> mostra ajuda rapida",
-                "- ctrl + c               -> encerra",
+                "- ctrl + c             -> encerra",
                 "",
                 "Dica: - EM LINHAS DIFERENTES - ",
                 "Insira o comando 'ingest <URL>', no padrão correto, que o sistema indexa automaticamente.",
