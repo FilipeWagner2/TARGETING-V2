@@ -21,6 +21,54 @@ MAX_CHUNK_CHARS = 1400
 CHUNK_OVERLAP_LINES = 3
 TOP_K = 6
 
+INTENT_PROFILES = {
+    "arquitetura": {
+        "top_k": 8,
+        "guidance": "focar em visao de alto nivel, componentes e fronteiras do sistema",
+        "next_steps": [
+            "Validar dependencia entre modulos principais.",
+            "Mapear riscos arquiteturais e pontos de acoplamento.",
+            "Definir backlog de melhorias estruturais.",
+        ],
+    },
+    "debugging": {
+        "top_k": 10,
+        "guidance": "focar em causa raiz, reproducao e correcao incremental",
+        "next_steps": [
+            "Reproduzir o problema com passos minimos e observaveis.",
+            "Validar causa raiz com logs, testes e leitura dos pontos afetados.",
+            "Aplicar correcao pequena e reexecutar regressao local.",
+        ],
+    },
+    "implementacao": {
+        "top_k": 8,
+        "guidance": "focar em plano de implementacao, impacto e criterios de aceite",
+        "next_steps": [
+            "Quebrar a implementacao em fases pequenas e reversiveis.",
+            "Adicionar testes cobrindo caminho feliz e erro.",
+            "Validar compatibilidade com comportamento legado.",
+        ],
+    },
+    "planejamento": {
+        "top_k": 6,
+        "guidance": "focar em roadmap, trade-offs e prioridades",
+        "next_steps": [
+            "Definir milestones com estimativa e dependencia tecnica.",
+            "Priorizar por impacto, risco e esforco.",
+            "Estabelecer metricas para acompanhar evolucao.",
+        ],
+    },
+    "resumo": {
+        "top_k": 5,
+        "guidance": "focar em sintese, pontos chave e proximas acoes",
+        "next_steps": [
+            "Confirmar entendimento com o solicitante.",
+            "Selecionar as duas prioridades imediatas.",
+            "Detalhar a primeira entrega executavel.",
+        ],
+    },
+}
+
 IGNORED_DIRS = {
     ".git",
     ".venv",
@@ -568,21 +616,31 @@ def build_evidence_lines(chunks: list[dict], max_items: int = 6) -> list[str]:
     return lines
 
 
-def build_recommended_request(user_question: str, repo_id: str, structure: dict) -> list[str]:
+def build_recommended_request(user_question: str, repo_id: str, structure: dict, intent: str) -> list[str]:
     top_dirs = structure.get("top_level_directories", [])
     dirs_text = ", ".join(top_dirs[:5]) or "raiz"
 
     return [
+        f"- Intencao identificada: {intent}",
         f"- Contexto: analisar o repositorio {repo_id} com foco no pedido: {user_question}",
         f"- Escopo sugerido: priorizar areas {dirs_text} e pontos de entrada relevantes.",
         "- Entregavel: plano objetivo com riscos, trade-offs, validacao e proximos passos.",
     ]
 
 
-def render_standard_response(raw_answer: str, retrieved_chunks: list[dict], user_question: str, repo_id: str, structure: dict) -> str:
+def render_standard_response(
+    raw_answer: str,
+    retrieved_chunks: list[dict],
+    user_question: str,
+    repo_id: str,
+    structure: dict,
+    intent: str,
+    next_steps: list[str],
+) -> str:
     summary = first_paragraph(raw_answer)
     evidence_lines = build_evidence_lines(retrieved_chunks)
-    request_lines = build_recommended_request(user_question, repo_id, structure)
+    request_lines = build_recommended_request(user_question, repo_id, structure, intent)
+    normalized_next_steps = [f"- {step}" for step in next_steps[:4]] or ["- Definir proximos passos com o time."]
 
     return "\n".join(
         [
@@ -596,9 +654,7 @@ def render_standard_response(raw_answer: str, retrieved_chunks: list[dict], user
             *request_lines,
             "",
             "4) Proximos passos",
-            "- Validar os pontos listados com inspeção direta dos arquivos citados.",
-            "- Refinar requisitos e definir prioridade de implementação.",
-            "- Executar ajustes em fases pequenas e medir regressao.",
+            *normalized_next_steps,
         ]
     )
 
@@ -824,6 +880,29 @@ def extract_question_without_url(text: str, repo_url: str) -> str:
     return question
 
 
+def detect_user_intent(question: str) -> str:
+    q = question.lower()
+
+    debugging_terms = ["erro", "bug", "falha", "quebra", "stack trace", "exception", "corrigir", "fix"]
+    architecture_terms = ["arquitetura", "estrutura", "componentes", "modulos", "design", "organiza"]
+    implementation_terms = ["implementar", "criar", "adicionar", "desenvolver", "codificar", "fazer"]
+    planning_terms = ["plano", "roadmap", "fases", "prioridade", "estimativa", "cronograma"]
+
+    if any(term in q for term in debugging_terms):
+        return "debugging"
+    if any(term in q for term in architecture_terms):
+        return "arquitetura"
+    if any(term in q for term in implementation_terms):
+        return "implementacao"
+    if any(term in q for term in planning_terms):
+        return "planejamento"
+    return "resumo"
+
+
+def get_intent_profile(intent: str) -> dict:
+    return INTENT_PROFILES.get(intent, INTENT_PROFILES["resumo"])
+
+
 api_key = get_api_key()
 if not api_key:
     raise ValueError("Defina a variavel de ambiente XAI_API_KEY antes de executar.")
@@ -990,12 +1069,16 @@ while True:
         print_agent_message(response.choices[0].message.content or "Sem conteudo retornado.")
         continue
 
-    retrieved = retrieve_chunks(active_index, user_input, top_k=TOP_K)
+    intent = detect_user_intent(user_input)
+    intent_profile = get_intent_profile(intent)
+
+    retrieved = retrieve_chunks(active_index, user_input, top_k=int(intent_profile.get("top_k", TOP_K)))
     context_text = build_context(retrieved)
     structure_text = format_structure_summary(active_index.get("structure", {}))
     prompt = (
         "Voce e um agente de analise de repositorios. "
         "Use o contexto recuperado e o resumo estrutural para responder com foco tecnico e acao objetiva.\n\n"
+        f"Intencao classificada: {intent}. Diretriz: {intent_profile.get('guidance', '')}.\n\n"
         "Formato da resposta:\n"
         "1) Resumo objetivo\n"
         "2) Evidencias (arquivos/linhas)\n"
@@ -1018,5 +1101,7 @@ while True:
         user_question=user_input,
         repo_id=active_repo_id or "repo_desconhecido",
         structure=active_index.get("structure", {}),
+        intent=intent,
+        next_steps=intent_profile.get("next_steps", []),
     )
     print_agent_message(standardized)
