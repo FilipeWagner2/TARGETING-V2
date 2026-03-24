@@ -371,13 +371,17 @@ def ensure_dirs() -> None:
 
 
 def repo_id_from_url(repo_url: str) -> str:
-    clean = repo_url.strip().rstrip("/")
+    # Remover caracteres especiais de URL (< > # geralmente usados em markdown)
+    clean = repo_url.strip().strip("<>").rstrip("/#>")
     if clean.endswith(".git"):
         clean = clean[:-4]
     parts = clean.split("/")
     if len(parts) >= 2:
-        return f"{parts[-2]}_{parts[-1]}".lower()
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", clean).lower()
+        repo_id = f"{parts[-2]}_{parts[-1]}".lower()
+    else:
+        repo_id = re.sub(r"[^a-zA-Z0-9_-]", "_", clean).lower()
+    # Remove any remaining invalid characters for directory names
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", repo_id).lower()
 
 
 def tokenize(text: str) -> list[str]:
